@@ -88,22 +88,97 @@ Class Quad_MTC
 
 	#tag Method, Flags = &h21
 		Private Function DoSubtraction(minusQuad As Quad_MTC) As Quad_MTC
-		  if minusQuad.IsZero then
-		    return self
-		  elseif self.IsZero then
-		    return Operator_Negate
+		  //
+		  // Expects two positive values, neither being Zero, INF, or NAN
+		  // However, minusQuad might be a larger value
+		  //
+		  
+		  dim higher as Quad_MTC
+		  dim lower as Quad_MTC
+		  dim doNegate as boolean
+		  
+		  if self = minusQuad then
+		    return 0.0
+		  elseif self < minusQuad then
+		    higher = minusQuad
+		    lower = self
+		    doNegate = true
+		  else 
+		    higher = self
+		    lower = minusQuad
 		  end if
 		  
-		  #pragma warning "Finish this!!"
+		  dim shift as Int16 = higher.TrueExponent - lower.TrueExponent
+		  if shift >= 112 then
+		    //
+		    // No point in subtracting since we can't hold it anyway
+		    //
+		    if doNegate then
+		      return -higher
+		    else
+		      return higher
+		    end if
+		  end if
+		  
+		  dim mbResult as MemoryBlock = ToMemoryBlock( lower, true )
+		  ShiftRight mbResult, shift
+		  
+		  dim mbOther as MemoryBlock = ToMemoryBlock( higher, true )
+		  
+		  dim carry as integer
+		  
+		  for byteIndex as integer = 14 downto 2 step 2
+		    dim v1 as integer = mbResult.UInt16Value( byteIndex ) 
+		    dim v2 as integer = mbOther.UInt16Value( byteIndex )
+		    
+		    if carry <> 0 and v1 >= carry then
+		      v1 = v1 - carry
+		      carry = 0
+		    end if
+		    
+		    if v1 < v2 then
+		      carry = 1
+		      v1 = v1 + &h010000
+		    end if
+		    
+		    v1 = v1 - v2
+		    
+		    mbResult.Int16Value( byteIndex ) = v1
+		  next
+		  
+		  //
+		  // See if we have value
+		  //
+		  if mbResult.Int64Value( 0 ) = 0 and mbResult.Int64Value( 8 ) = 0 then
+		    return 0.0
+		  end if
+		  
+		  dim expValue as integer = ShiftToExponent( mbResult, higher.TrueExponent )
+		  
+		  dim resultStruct as QuadStruct
+		  resultStruct.StringValue( mbResult.LittleEndian ) = mbResult
+		  
+		  dim result as new Quad_MTC( resultStruct )
+		  result.TrueExponent = expValue
+		  result.IsNegative = doNegate
+		  
+		  return result
+		  
 		End Function
 	#tag EndMethod
 
 	#tag Method, Flags = &h0
 		Function Operator_Add(toQuad As Quad_MTC) As Quad_MTC
-		  if IsINF or IsNan then
+		  if IsINF then
 		    return self
 		    
-		  elseif toQuad.IsINF or toQuad.IsNan then
+		  elseif toQuad.IsINF then
+		    return toQuad
+		    
+		  elseif IsNan then
+		    return self
+		    
+		  elseif toQuad.IsNan then
 		    return toQuad
 		    
 		  elseif IsZero then
@@ -116,10 +191,10 @@ Class Quad_MTC
 		    return DoAddition( toQuad )
 		    
 		  elseif toQuad.IsNegative then
-		    return self - toQuad.Abs
+		    return DoSubtraction( toQuad.Abs )
 		    
 		  else
-		    return toQuad - self.Abs
+		    return toQuad - Abs
 		    
 		  end if
 		  
@@ -246,10 +321,16 @@ Class Quad_MTC
 
 	#tag Method, Flags = &h0
 		Function Operator_Subtract(minusQuad As Quad_MTC) As Quad_MTC
-		  if IsNan or IsINF then
+		  if IsINF then
 		    return self
 		    
-		  elseif minusQuad.IsNan or minusQuad.IsINF then
+		  elseif minusQuad.IsINF then
+		    return minusQuad
+		    
+		  elseif IsNan then
+		    return self
+		    
+		  elseif minusQuad.IsNan then
 		    return minusQuad
 		    
 		  elseif minusQuad.IsZero then
@@ -263,11 +344,11 @@ Class Quad_MTC
 		    
 		  elseif IsNegative and not minusQuad.IsNegative then
 		    dim r as Quad_MTC = Abs + minusQuad
-		    r.IsNegative = not r.IsNegative
+		    r.IsNegative = true
 		    return r
 		    
 		  elseif IsNegative and minusQuad.IsNegative then
-		    return minusQuad + self
+		    return MinusQuad.Abs - Abs
 		    
 		  else
 		    return DoSubtraction( minusQuad )
@@ -275,6 +356,63 @@ Class Quad_MTC
 		  end if
 		  
 		End Function
+	#tag EndMethod
+
+	#tag Method, Flags = &h21
+		Private Shared Sub ShiftLeft(mb As MemoryBlock, shift As Integer)
+		  if shift = 0 then
+		    return
+		  end if
+		  
+		  dim p as ptr = mb
+		  
+		  while shift >= 64
+		    p.UInt64( 0 ) = p.UInt64( 64 )
+		    p.UInt64( 64 ) = CType( 0, UInt64 )
+		    shift = shift - 64
+		  wend
+		  
+		  while shift >= 32
+		    p.UInt32( 0 ) = p.UInt32( 32 )
+		    p.UInt32( 32 ) = p.UInt32( 64 )
+		    p.UInt32( 64 ) = p.UInt32( 96 )
+		    p.UInt32( 96 ) = CType( 0, UInt32 )
+		    shift = shift - 32
+		  wend
+		  
+		  while shift >= 16
+		    for byteIndex as integer = 0 to 12 step 2
+		      p.UInt16( byteIndex ) = p.UInt16( byteIndex + 2 )
+		    next
+		    p.UInt16( 14 ) = CType( 0, UInt16 )
+		    shift = shift - 16
+		  wend
+		  
+		  while shift >= 8
+		    for byteIndex as integer = 0 to 14
+		      p.UInt8( byteIndex ) = p.UInt8( byteIndex + 1 )
+		    next
+		    p.UInt8( 15 ) = CType( 0, UInt8 )
+		    shift = shift - 8
+		  wend
+		  
+		  if shift <> 0 then
+		    dim leftShifter as UInt8 = CType( 2 ^ shift, UInt8 )
+		    dim rightShifter as UInt8 = CType( 2 ^ ( 8 - shift ), UInt8 )
+		    
+		    for byteIndex as integer = 0 to 14
+		      dim thisByte as UInt8 = p.UInt8( byteIndex )
+		      dim nextByte as UInt8 = p.UInt8( byteIndex + 1 )
+		      
+		      dim mask as UInt8 = nextByte \ rightShifter
+		      thisByte = ( thisByte * leftShifter ) or mask
+		      p.UInt8( byteIndex ) = thisByte 
+		    next
+		    
+		    p.Byte( 15 ) = p.Byte( 15 ) * leftShifter
+		  end if
+		  
+		End Sub
 	#tag EndMethod
 
 	#tag Method, Flags = &h21
@@ -332,6 +470,61 @@ Class Quad_MTC
 		  end if
 		  
 		End Sub
+	#tag EndMethod
+
+	#tag Method, Flags = &h21
+		Private Shared Function ShiftToExponent(mb As MemoryBlock, startingExp As Integer) As Integer
+		  //
+		  // Will shift a MemoryBlock to the left
+		  // until there is an exponent
+		  // The caller must confirm that it has a value
+		  //
+		  
+		  if mb.Int16Value( 0 ) <> 0 then
+		    return startingExp
+		  end if
+		  
+		  //
+		  // Find the first byte with content
+		  //
+		  dim p as ptr = mb
+		  
+		  dim targetByteIndex as integer
+		  dim targetByte as byte
+		  
+		  dim lastByteIndex as integer = mb.Size - 1
+		  for targetByteIndex = 1 to lastByteIndex
+		    targetByte = p.Byte( targetByteIndex )
+		    if targetByte <> 0 then
+		      exit
+		    end if
+		  next
+		  
+		  dim targetBitIndex as integer
+		  select case targetByte
+		  case is >= &b10000000
+		    targetBitIndex = 1
+		  case is >= &b01000000
+		    targetBitIndex = 2
+		  case is >= &b00100000
+		    targetBitIndex = 3
+		  case is >= &b00010000
+		    targetBitIndex = 4
+		  case is >= &b00001000
+		    targetBitIndex = 5
+		  case is >= &b00000100
+		    targetBitIndex = 6
+		  case is >= &b00000010
+		    targetBitIndex = 7
+		  case else
+		    targetBitIndex = 8
+		  end select
+		  
+		  dim shift as integer = ( ( targetByteIndex - 1 ) * 8 ) + targetBitIndex
+		  ShiftLeft mb, shift
+		  return startingExp - shift
+		  
+		End Function
 	#tag EndMethod
 
 	#tag Method, Flags = &h21
