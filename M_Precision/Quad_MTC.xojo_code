@@ -87,6 +87,71 @@ Class Quad_MTC
 	#tag EndMethod
 
 	#tag Method, Flags = &h21
+		Private Function DoMultiplication(other As Quad_MTC) As Quad_MTC
+		  //
+		  // Both are good values, but might be negative
+		  //
+		  
+		  dim makeNegative as boolean = self.IsNegative xor other.IsNegative
+		  
+		  dim higher as Quad_MTC
+		  dim lower as Quad_MTC
+		  
+		  if self >= other then
+		    higher = self
+		    lower = other
+		  else
+		    higher = other
+		    lower = self
+		  end if
+		  
+		  dim mbHigher as MemoryBlock = ToMemoryBlock( higher, true )
+		  
+		  dim shift as Int16 = higher.TrueExponent - lower.TrueExponent
+		  if shift >= 112 then
+		    //
+		    // No point in adding since we can't hold it anyway
+		    //
+		    return higher
+		  end if
+		  
+		  dim mbLower as MemoryBlock = ToMemoryBlock( lower, true )
+		  ShiftRight mbLower, shift
+		  
+		  dim mbResult as new MemoryBlock( mbHigher.Size )
+		  
+		  for lowerIndex as integer = 14 downto 0 step 2
+		    dim lowerValue as integer = mbLower.UInt16Value( lowerIndex )
+		    
+		    dim carry as integer
+		    
+		    for higherIndex as integer = lowerIndex downto 0 step 2
+		      dim resultValue as integer = mbResult.UInt16Value( higherIndex )
+		      
+		      dim higherValue as integer = mbHigher.UInt16Value( higherIndex )
+		      resultValue = higherValue * lowerValue + resultValue
+		      resultValue = resultValue + carry
+		      
+		      carry = resultValue and &hFFFF0000 \ CType( 2 ^ 16, integer )
+		      resultValue = resultValue and &h0000FFFF
+		      mbResult.UInt16Value( higherIndex ) = resultValue
+		    next
+		  next
+		  
+		  dim exp as integer = ShiftToExponent( mbResult, higher.TrueExponent )
+		  dim resultStruct as QuadStruct
+		  resultStruct.StringValue( mbResult.LittleEndian ) = mbResult
+		  
+		  dim result as new Quad_MTC( resultStruct )
+		  result.TrueExponent = exp
+		  result.IsNegative = makeNegative
+		  
+		  return result
+		  
+		End Function
+	#tag EndMethod
+
+	#tag Method, Flags = &h21
 		Private Function DoSubtraction(minusQuad As Quad_MTC) As Quad_MTC
 		  //
 		  // Expects two positive values, neither being Zero, INF, or NAN
@@ -311,6 +376,34 @@ Class Quad_MTC
 	#tag EndMethod
 
 	#tag Method, Flags = &h0
+		Function Operator_Multiply(other As Quad_MTC) As Quad_MTC
+		  if IsZero then
+		    return other
+		    
+		  elseif other.IsZero then
+		    return self
+		    
+		  elseif IsINF then
+		    return self
+		    
+		  elseif other.IsINF then
+		    return other
+		    
+		  elseif IsNan then
+		    return self
+		    
+		  elseif other.IsNan then
+		    return other
+		    
+		  else
+		    return DoMultiplication( other )
+		    
+		  end if
+		  
+		End Function
+	#tag EndMethod
+
+	#tag Method, Flags = &h0
 		Function Operator_Negate() As Quad_MTC
 		  dim q as new Quad_MTC( Data )
 		  q.IsNegative = not IsNegative
@@ -475,13 +568,26 @@ Class Quad_MTC
 	#tag Method, Flags = &h21
 		Private Shared Function ShiftToExponent(mb As MemoryBlock, startingExp As Integer) As Integer
 		  //
-		  // Will shift a MemoryBlock to the left
-		  // until there is an exponent
+		  // Will shift a MemoryBlock 
+		  // until the first Int16 = 1
 		  // The caller must confirm that it has a value
 		  //
 		  
-		  if mb.Int16Value( 0 ) <> 0 then
+		  dim firstValue as integer = mb.UInt16Value( 0 ) and &b0111111111111111
+		  if firstValue = 1 then
 		    return startingExp
+		  elseif firstValue <> 0 then
+		    dim shift as integer
+		    dim tester as integer = &b1000000000000000
+		    for i as integer = 15 downto 0
+		      if firstValue >= tester then
+		        shift = i - 1
+		        exit
+		      end if
+		      tester = tester \ 2
+		    next
+		    ShiftRight mb, shift
+		    return startingExp + shift
 		  end if
 		  
 		  //
