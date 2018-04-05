@@ -120,30 +120,30 @@ Class Quad_MTC
 		    end if
 		  end if
 		  
-		  dim mbResult as MemoryBlock = ToMemoryBlock( lower, true )
-		  ShiftRight mbResult, shift
+		  dim mbResult as MemoryBlock = ToMemoryBlock( higher, true )
 		  
-		  dim mbOther as MemoryBlock = ToMemoryBlock( higher, true )
+		  dim mbOther as MemoryBlock = ToMemoryBlock( lower, true )
+		  ShiftRight mbOther, shift
 		  
 		  dim carry as integer
 		  
-		  for byteIndex as integer = 14 downto 2 step 2
+		  for byteIndex as integer = 14 downto 0 step 2
 		    dim v1 as integer = mbResult.UInt16Value( byteIndex ) 
 		    dim v2 as integer = mbOther.UInt16Value( byteIndex )
 		    
 		    if carry <> 0 and v1 >= carry then
-		      v1 = v1 - carry
-		      carry = 0
+		      v1 = v1 - 1
+		      carry = carry - 1
 		    end if
 		    
 		    if v1 < v2 then
-		      carry = 1
+		      carry = carry + 1
 		      v1 = v1 + &h010000
 		    end if
 		    
 		    v1 = v1 - v2
 		    
-		    mbResult.Int16Value( byteIndex ) = v1
+		    mbResult.UInt16Value( byteIndex ) = v1
 		  next
 		  
 		  //
@@ -493,7 +493,7 @@ Class Quad_MTC
 		  dim targetByte as byte
 		  
 		  dim lastByteIndex as integer = mb.Size - 1
-		  for targetByteIndex = 1 to lastByteIndex
+		  for targetByteIndex = 2 to lastByteIndex
 		    targetByte = p.Byte( targetByteIndex )
 		    if targetByte <> 0 then
 		      exit
@@ -520,7 +520,7 @@ Class Quad_MTC
 		    targetBitIndex = 8
 		  end select
 		  
-		  dim shift as integer = ( ( targetByteIndex - 1 ) * 8 ) + targetBitIndex
+		  dim shift as integer = ( ( targetByteIndex - 2 ) * 8 ) + targetBitIndex
 		  ShiftLeft mb, shift
 		  return startingExp - shift
 		  
@@ -551,6 +551,27 @@ Class Quad_MTC
 	#tag Property, Flags = &h21
 		Private Data As QuadStruct
 	#tag EndProperty
+
+	#tag ComputedProperty, Flags = &h21
+		#tag Getter
+			Get
+			  dim bin() as string
+			  bin.Append if( IsNegative, "1", "0" )
+			  bin.Append " "
+			  
+			  dim exp as Int16 = Data.Exp and &b0111111111111111
+			  bin.Append exp.ToBinary( 15 )
+			  
+			  for i as integer = 0 to Data.Nums.Ubound
+			    bin.Append " "
+			    bin.Append Data.Nums( i ).ToBinary( 16 )
+			  next
+			  
+			  return join( bin, "" )
+			End Get
+		#tag EndGetter
+		Private DebugBin As String
+	#tag EndComputedProperty
 
 	#tag ComputedProperty, Flags = &h21
 		#tag Getter

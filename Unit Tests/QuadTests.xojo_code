@@ -112,8 +112,8 @@ Inherits TestGroup
 
 	#tag Method, Flags = &h0
 		Sub SubtractTest()
-		  dim doubles1() as double = array( 3.0, 8.9, 576.98, 0.0 )
-		  dim doubles2() as double = array( 1.0, 2.5, 476.33, 0.0 )
+		  dim doubles1() as double = array( 3855.0, 3.0, 8.9, 576.98, 0.0 )
+		  dim doubles2() as double = array( 1017.0, 1.0, 2.5, 476.33, 0.0 )
 		  
 		  for i1 as integer = 0 to doubles1.Ubound
 		    dim mult as double = 1.0
@@ -128,11 +128,17 @@ Inherits TestGroup
 		        dim d2 as double = doubles2( i2 ) * mult
 		        dim q2 as Quad_MTC = d2
 		        
+		        #if DebugBuild then
+		          if d1 = 8.9 and d2 = 1.0 then
+		            d1 = d1 // A place to break
+		          end if
+		        #endif
+		        
 		        dim expected as double = d1 - d2
 		        dim qSum as Quad_MTC = q1 - q2
 		        dim actual as double = qSum
 		        
-		        Assert.AreEqual expected, actual
+		        Assert.AreEqual expected, actual, 2, d1.ToText + " - " + d2.ToText
 		      next
 		      
 		      mult = 0.0 - mult
