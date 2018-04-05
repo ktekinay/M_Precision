@@ -112,7 +112,7 @@ Inherits TestGroup
 		        dim q2 as Quad_MTC = d2
 		        
 		        #if DebugBuild then
-		          if d1 = 0.0 and d2 = -2.5 then
+		          if d1 = 3855.0 and d2 = 1.0 then
 		            d1 = d1 // A place to break
 		          end if
 		        #endif

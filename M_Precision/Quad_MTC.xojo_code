@@ -119,20 +119,21 @@ Class Quad_MTC
 		  ShiftRight mbLower, shift
 		  
 		  dim mbResult as new MemoryBlock( mbHigher.Size )
+		  mbResult.LittleEndian = false
 		  
 		  for lowerIndex as integer = 14 downto 0 step 2
-		    dim lowerValue as integer = mbLower.UInt16Value( lowerIndex )
+		    dim lowerValue as UInt64 = mbLower.UInt16Value( lowerIndex )
 		    
-		    dim carry as integer
+		    dim carry as UInt64
 		    
 		    for higherIndex as integer = lowerIndex downto 0 step 2
-		      dim resultValue as integer = mbResult.UInt16Value( higherIndex )
+		      dim resultValue as UInt64 = mbResult.UInt16Value( higherIndex )
 		      
-		      dim higherValue as integer = mbHigher.UInt16Value( higherIndex )
+		      dim higherValue as UInt64 = mbHigher.UInt16Value( higherIndex )
 		      resultValue = higherValue * lowerValue + resultValue
 		      resultValue = resultValue + carry
 		      
-		      carry = resultValue and &hFFFF0000 \ CType( 2 ^ 16, integer )
+		      carry = ( resultValue and &hFFFF0000 ) \ CType( 2 ^ 16, UInt64 )
 		      resultValue = resultValue and &h0000FFFF
 		      mbResult.UInt16Value( higherIndex ) = resultValue
 		    next
@@ -457,53 +458,26 @@ Class Quad_MTC
 		    return
 		  end if
 		  
-		  dim p as ptr = mb
-		  
 		  while shift >= 64
-		    p.UInt64( 0 ) = p.UInt64( 64 )
-		    p.UInt64( 64 ) = CType( 0, UInt64 )
+		    mb.UInt64Value( 0 ) = mb.UInt64Value( 8 )
+		    mb.UInt64Value( 8 ) = CType( 0, UInt64 )
 		    shift = shift - 64
 		  wend
 		  
-		  while shift >= 32
-		    p.UInt32( 0 ) = p.UInt32( 32 )
-		    p.UInt32( 32 ) = p.UInt32( 64 )
-		    p.UInt32( 64 ) = p.UInt32( 96 )
-		    p.UInt32( 96 ) = CType( 0, UInt32 )
-		    shift = shift - 32
-		  wend
+		  dim leftShifter as UInt64 = CType( 2 ^ shift, UInt64 )
+		  dim rightShifter as UInt64 = CType( 2 ^ ( 64 - shift ), UInt64 )
 		  
-		  while shift >= 16
-		    for byteIndex as integer = 0 to 12 step 2
-		      p.UInt16( byteIndex ) = p.UInt16( byteIndex + 2 )
-		    next
-		    p.UInt16( 14 ) = CType( 0, UInt16 )
-		    shift = shift - 16
-		  wend
+		  dim firstHalf as UInt64 = mb.UInt64Value( 0 )
+		  dim secondHalf as UInt64 = mb.UInt64Value( 8 )
 		  
-		  while shift >= 8
-		    for byteIndex as integer = 0 to 14
-		      p.UInt8( byteIndex ) = p.UInt8( byteIndex + 1 )
-		    next
-		    p.UInt8( 15 ) = CType( 0, UInt8 )
-		    shift = shift - 8
-		  wend
+		  dim mask as UInt64 = secondHalf \ rightShifter
 		  
-		  if shift <> 0 then
-		    dim leftShifter as UInt8 = CType( 2 ^ shift, UInt8 )
-		    dim rightShifter as UInt8 = CType( 2 ^ ( 8 - shift ), UInt8 )
-		    
-		    for byteIndex as integer = 0 to 14
-		      dim thisByte as UInt8 = p.UInt8( byteIndex )
-		      dim nextByte as UInt8 = p.UInt8( byteIndex + 1 )
-		      
-		      dim mask as UInt8 = nextByte \ rightShifter
-		      thisByte = ( thisByte * leftShifter ) or mask
-		      p.UInt8( byteIndex ) = thisByte 
-		    next
-		    
-		    p.Byte( 15 ) = p.Byte( 15 ) * leftShifter
-		  end if
+		  firstHalf = firstHalf * leftShifter
+		  firstHalf = firstHalf or mask
+		  secondHalf = secondHalf * leftShifter
+		  
+		  mb.UInt64Value( 0 ) = firstHalf
+		  mb.UInt64Value( 8 ) = secondHalf
 		  
 		End Sub
 	#tag EndMethod
@@ -514,53 +488,26 @@ Class Quad_MTC
 		    return
 		  end if
 		  
-		  dim p as ptr = mb
-		  
 		  while shift >= 64
-		    p.UInt64( 64 ) = p.UInt64( 0 )
-		    p.UInt64( 0 ) = CType( 0, UInt64 )
+		    mb.UInt64Value( 8 ) = mb.UInt64Value( 0 )
+		    mb.UInt64Value( 0 ) = CType( 0, UInt64 )
 		    shift = shift - 64
 		  wend
 		  
-		  while shift >= 32
-		    p.UInt32( 96 ) = p.UInt32( 64 )
-		    p.UInt32( 64 ) = p.UInt32( 32 )
-		    p.UInt32( 32 ) = p.UInt32( 0 )
-		    p.UInt32( 0 ) = CType( 0, UInt32 )
-		    shift = shift - 32
-		  wend
+		  dim rightShifter as UInt64 = CType( 2 ^ shift, UInt64 )
+		  dim leftShifter as UInt64 = CType( 2 ^ ( 64 - shift ), UInt64 )
 		  
-		  while shift >= 16
-		    for byteIndex as integer = 14 downto 2 step 2
-		      p.UInt16( byteIndex ) = p.UInt16( byteIndex - 2 )
-		    next
-		    p.UInt16( 0 ) = CType( 0, UInt16 )
-		    shift = shift - 16
-		  wend
+		  dim firstHalf as UInt64 = mb.UInt64Value( 0 )
+		  dim secondHalf as UInt64 = mb.UInt64Value( 8 )
 		  
-		  while shift >= 8
-		    for byteIndex as integer = 15 downto 1
-		      p.UInt8( byteIndex ) = p.UInt8( byteIndex - 1 )
-		    next
-		    p.UInt8( 0 ) = CType( 0, UInt8 )
-		    shift = shift - 8
-		  wend
+		  dim mask as UInt64 = firstHalf * leftShifter
 		  
-		  if shift <> 0 then
-		    dim rightShifter as UInt8 = CType( 2 ^ shift, UInt8 )
-		    dim leftShifter as UInt8 = CType( 2 ^ ( 8 - shift ), UInt8 )
-		    
-		    for byteIndex as integer = 15 downto 1
-		      dim thisByte as UInt8 = p.UInt8( byteIndex )
-		      dim prevByte as UInt8 = p.UInt8( byteIndex - 1 )
-		      
-		      dim mask as UInt8 = prevByte * leftShifter
-		      thisByte = ( thisByte \ rightShifter ) or mask
-		      p.UInt8( byteIndex ) = thisByte 
-		    next
-		    
-		    p.Byte( 0 ) = p.Byte( 0 ) \ rightShifter
-		  end if
+		  secondHalf = secondHalf \ rightShifter
+		  secondHalf = secondHalf or mask
+		  firstHalf = firstHalf \ rightShifter
+		  
+		  mb.UInt64Value( 0 ) = firstHalf
+		  mb.UInt64Value( 8 ) = secondHalf
 		  
 		End Sub
 	#tag EndMethod
@@ -573,7 +520,7 @@ Class Quad_MTC
 		  // The caller must confirm that it has a value
 		  //
 		  
-		  dim firstValue as integer = mb.UInt16Value( 0 ) and &b0111111111111111
+		  dim firstValue as integer = mb.UInt16Value( 0 )
 		  if firstValue = 1 then
 		    return startingExp
 		  elseif firstValue <> 0 then
@@ -581,7 +528,7 @@ Class Quad_MTC
 		    dim tester as integer = &b1000000000000000
 		    for i as integer = 15 downto 0
 		      if firstValue >= tester then
-		        shift = i - 1
+		        shift = i
 		        exit
 		      end if
 		      tester = tester \ 2
