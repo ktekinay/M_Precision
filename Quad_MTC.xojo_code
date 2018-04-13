@@ -97,13 +97,41 @@ Class Quad_MTC
 		  dim higher as Quad_MTC
 		  dim lower as Quad_MTC
 		  
-		  if self >= other then
+		  if self.IsNegative = false and other.IsNegative = false then
+		    if self >= other then
+		      higher = self
+		      lower = other
+		    else
+		      higher = other
+		      lower = self
+		    end if
+		  elseif self.IsNegative and other.IsNegative then
+		    if self <= other then
+		      higher = self
+		      lower = other
+		    else
+		      higher = other
+		      lower = self
+		    end if
+		  elseif self.Abs >= other.Abs then
 		    higher = self
 		    lower = other
 		  else
 		    higher = other
 		    lower = self
 		  end if
+		  
+		  #if DebugBuild then
+		    dim debugHigher as double = higher
+		    dim debugLower as double = lower
+		    
+		    if debugHigher = 1.0 and debugLower = 1.0 then
+		      debugHigher = debugHigher // A place to break
+		    end if
+		  #endif
+		  
+		  dim higherExp as integer = higher.TrueExponent
+		  dim lowerExp as integer = lower.TrueExponent
 		  
 		  dim mbHigher as MemoryBlock = ToMemoryBlock( higher, true )
 		  
@@ -118,28 +146,63 @@ Class Quad_MTC
 		  dim mbLower as MemoryBlock = ToMemoryBlock( lower, true )
 		  ShiftRight mbLower, shift
 		  
-		  dim mbResult as new MemoryBlock( mbHigher.Size )
-		  mbResult.LittleEndian = false
+		  const kStepper as integer = 2
 		  
-		  for lowerIndex as integer = 14 downto 0 step 2
+		  dim mbResult as new MemoryBlock( mbHigher.Size * 3 )
+		  mbResult.LittleEndian = false
+		  dim resultStartingIndex as integer = mbResult.Size - mbHigher.Size + kStepper
+		  
+		  dim higherIndexIdentified as boolean
+		  dim higherRightIndex as integer = 16 - kStepper
+		  
+		  dim carry as UInt64
+		  
+		  for lowerIndex as integer = ( 16 - kStepper ) downto 0 step kStepper
+		    resultStartingIndex = resultStartingIndex - kStepper
+		    
 		    dim lowerValue as UInt64 = mbLower.UInt16Value( lowerIndex )
 		    
-		    dim carry as UInt64
+		    if lowerValue = CType( 0, UInt64 ) then
+		      continue for lowerIndex
+		    end if
 		    
-		    for higherIndex as integer = lowerIndex downto 0 step 2
-		      dim resultValue as UInt64 = mbResult.UInt16Value( higherIndex )
-		      
+		    
+		    for higherIndex as integer = higherRightIndex downto 0 step kStepper
 		      dim higherValue as UInt64 = mbHigher.UInt16Value( higherIndex )
-		      resultValue = higherValue * lowerValue + resultValue
-		      resultValue = resultValue + carry
+		      if higherValue = CType( 0, UInt64 ) and carry = CType( 0, UInt64 ) then
+		        continue for higherIndex
+		      end if
 		      
-		      carry = ( resultValue and &hFFFF0000 ) \ CType( 2 ^ 16, UInt64 )
-		      resultValue = resultValue and &h0000FFFF
-		      mbResult.UInt16Value( higherIndex ) = resultValue
+		      if not higherIndexIdentified then
+		        higherRightIndex = higherIndex
+		        higherIndexIdentified = true
+		      end if
+		      
+		      dim resultValue as UInt64 = mbResult.UInt16Value( resultStartingIndex + higherIndex )
+		      resultValue = ( higherValue * lowerValue ) + resultValue + carry
+		      
+		      const kLeftMask as UInt64 = &hFFFF0000
+		      const kRightMask as UInt64 = &h0000FFFF
+		      
+		      carry = ( resultValue and  kLeftMask ) \ CType( 2 ^ ( kStepper * 8 ), UInt64 )
+		      resultValue = resultValue and kRightMask
+		      mbResult.UInt16Value( resultStartingIndex + higherIndex ) = resultValue
 		    next
+		    
+		    if carry <> CType( 0, UInt64 ) then
+		      mbResult.UInt16Value( resultStartingIndex - kStepper ) = carry
+		    end if
 		  next
 		  
-		  dim exp as integer = ShiftToExponent( mbResult, higher.TrueExponent )
+		  dim shiftedExp as integer = ShiftToExponent( mbResult, 147 + higherExp + lowerExp )
+		  dim exp as integer = shiftedExp 'higherExp + lowerExp
+		  'if lowerExp <> 0 and ( shiftedExp mod 2 ) <> 0 then
+		  'exp = exp + 1
+		  'end if
+		  'if carry <> CType( 0, UInt64 ) then
+		  'exp = exp + 1
+		  'end if
+		  
 		  dim resultStruct as QuadStruct
 		  resultStruct.StringValue( mbResult.LittleEndian ) = mbResult
 		  
@@ -379,10 +442,10 @@ Class Quad_MTC
 	#tag Method, Flags = &h0
 		Function Operator_Multiply(other As Quad_MTC) As Quad_MTC
 		  if IsZero then
-		    return other
+		    return self
 		    
 		  elseif other.IsZero then
-		    return self
+		    return other
 		    
 		  elseif IsINF then
 		    return self
@@ -458,26 +521,34 @@ Class Quad_MTC
 		    return
 		  end if
 		  
+		  dim mbSize as integer = mb.Size
+		  dim lastByteIndex as integer = mbSize - 1
+		  
 		  while shift >= 64
-		    mb.UInt64Value( 0 ) = mb.UInt64Value( 8 )
-		    mb.UInt64Value( 8 ) = CType( 0, UInt64 )
+		    for byteIndex as integer = 8 to lastByteIndex step 8
+		      mb.UInt64Value( byteIndex - 8 ) = mb.UInt64Value( byteIndex )
+		    next
+		    mb.UInt64Value( mbSize - 8 ) = CType( 0, UInt64 )
 		    shift = shift - 64
 		  wend
 		  
 		  dim leftShifter as UInt64 = CType( 2 ^ shift, UInt64 )
 		  dim rightShifter as UInt64 = CType( 2 ^ ( 64 - shift ), UInt64 )
 		  
-		  dim firstHalf as UInt64 = mb.UInt64Value( 0 )
-		  dim secondHalf as UInt64 = mb.UInt64Value( 8 )
+		  for byteIndex as integer = 8 to lastByteIndex step 8
+		    dim leftBlock as UInt64 = mb.UInt64Value( byteIndex - 8 )
+		    dim rightBlock as UInt64 = mb.UInt64Value( byteIndex )
+		    
+		    dim mask as UInt64 = rightBlock \ rightShifter
+		    
+		    leftBlock = leftBlock * leftShifter
+		    leftBlock = leftBlock or mask
+		    rightBlock = rightBlock * leftShifter
+		    
+		    mb.UInt64Value( byteIndex - 8 ) = leftBlock
+		    mb.UInt64Value( byteIndex ) = rightBlock
+		  next
 		  
-		  dim mask as UInt64 = secondHalf \ rightShifter
-		  
-		  firstHalf = firstHalf * leftShifter
-		  firstHalf = firstHalf or mask
-		  secondHalf = secondHalf * leftShifter
-		  
-		  mb.UInt64Value( 0 ) = firstHalf
-		  mb.UInt64Value( 8 ) = secondHalf
 		  
 		End Sub
 	#tag EndMethod
@@ -488,8 +559,13 @@ Class Quad_MTC
 		    return
 		  end if
 		  
+		  dim mbSize as integer = mb.Size
+		  dim lastByteIndex as integer = mbSize - 8
+		  
 		  while shift >= 64
-		    mb.UInt64Value( 8 ) = mb.UInt64Value( 0 )
+		    for byteIndex as integer = lastByteIndex downto 8 step 8
+		      mb.UInt64Value( byteIndex ) = mb.UInt64Value( byteIndex - 8 )
+		    next
 		    mb.UInt64Value( 0 ) = CType( 0, UInt64 )
 		    shift = shift - 64
 		  wend
@@ -497,18 +573,19 @@ Class Quad_MTC
 		  dim rightShifter as UInt64 = CType( 2 ^ shift, UInt64 )
 		  dim leftShifter as UInt64 = CType( 2 ^ ( 64 - shift ), UInt64 )
 		  
-		  dim firstHalf as UInt64 = mb.UInt64Value( 0 )
-		  dim secondHalf as UInt64 = mb.UInt64Value( 8 )
-		  
-		  dim mask as UInt64 = firstHalf * leftShifter
-		  
-		  secondHalf = secondHalf \ rightShifter
-		  secondHalf = secondHalf or mask
-		  firstHalf = firstHalf \ rightShifter
-		  
-		  mb.UInt64Value( 0 ) = firstHalf
-		  mb.UInt64Value( 8 ) = secondHalf
-		  
+		  for byteIndex as integer = lastByteIndex downto 8
+		    dim leftBlock as UInt64 = mb.UInt64Value( byteIndex - 8 )
+		    dim rightBlock as UInt64 = mb.UInt64Value( byteIndex )
+		    
+		    dim mask as UInt64 = leftBlock * leftShifter
+		    
+		    rightBlock = rightBlock \ rightShifter
+		    rightBlock = rightBlock or mask
+		    leftBlock = leftBlock \ rightShifter
+		    
+		    mb.UInt64Value( byteIndex - 8 ) = leftBlock
+		    mb.UInt64Value( byteIndex ) = rightBlock
+		  next
 		End Sub
 	#tag EndMethod
 
@@ -520,13 +597,15 @@ Class Quad_MTC
 		  // The caller must confirm that it has a value
 		  //
 		  
+		  dim lastByteIndex as integer = mb.Size - 1
+		  
 		  dim firstValue as integer = mb.UInt16Value( 0 )
 		  if firstValue = 1 then
 		    return startingExp
 		  elseif firstValue <> 0 then
 		    dim shift as integer
 		    dim tester as integer = &b1000000000000000
-		    for i as integer = 15 downto 0
+		    for i as integer = lastByteIndex downto 0
 		      if firstValue >= tester then
 		        shift = i
 		        exit
@@ -545,7 +624,6 @@ Class Quad_MTC
 		  dim targetByteIndex as integer
 		  dim targetByte as byte
 		  
-		  dim lastByteIndex as integer = mb.Size - 1
 		  for targetByteIndex = 2 to lastByteIndex
 		    targetByte = p.Byte( targetByteIndex )
 		    if targetByte <> 0 then
@@ -797,7 +875,7 @@ Class Quad_MTC
 		Private IsZero As Boolean
 	#tag EndComputedProperty
 
-	#tag ComputedProperty, Flags = &h21
+	#tag ComputedProperty, Flags = &h0
 		#tag Getter
 			Get
 			  const kZero as Int16 = 0
@@ -816,16 +894,11 @@ Class Quad_MTC
 			  const kZero as Int16 = 0
 			  
 			  dim sign as Int16 = Data.Exp and ( &b100000000000000 )
-			  
-			  if value = kZero then
-			    Data.Exp = sign
-			  else
-			    Data.Exp = sign or ( value + CType( kBias, UInt16 ) )
-			  end if
+			  Data.Exp = sign or ( value + CType( kBias, UInt16 ) )
 			  
 			End Set
 		#tag EndSetter
-		Private TrueExponent As Int16
+		TrueExponent As Int16
 	#tag EndComputedProperty
 
 

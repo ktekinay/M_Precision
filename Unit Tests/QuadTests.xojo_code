@@ -95,13 +95,22 @@ Inherits TestGroup
 
 	#tag Method, Flags = &h0
 		Sub MultiplyTest()
-		  dim doubles1() as double = array( 3855.0, 3.0, 8.9, 576.98, 0.0 )
-		  dim doubles2() as double = array( 1017.0, 1.0, 2.5, 476.33, 0.0 )
+		  const kFormat as text = "###,##0.0000;-###,##0.0000"
+		  
+		  dim locale as Xojo.Core.Locale = Xojo.Core.Locale.Current
+		  
+		  dim doubles1() as double = array( 1.0, 3855.0, 3.0, 8.9, 576.98, 0.0025 )
+		  dim doubles2() as double = array( 1.0, 1017.0, 2.5, 476.33, 0.0 )
+		  
+		  'doubles1 = array( 3855.0 )
+		  'doubles2 = array( 476.33 )
+		  
+		  dim fails() as double
 		  
 		  for i1 as integer = 0 to doubles1.Ubound
 		    dim mult as double = 1.0
 		    
-		    for inner as integer = 1 to 2
+		    for inner as integer = 1 to 1
 		      
 		      dim d1 as double = doubles1( i1 ) * mult
 		      dim q1 as Quad_MTC = d1
@@ -118,10 +127,17 @@ Inherits TestGroup
 		        #endif
 		        
 		        dim expected as double = d1 * d2
-		        dim qSum as Quad_MTC = q1 * q2
-		        dim actual as double = qSum
+		        dim expectedQuad as Quad_MTC = expected
+		        dim qMult as Quad_MTC = q1 * q2
+		        dim actual as double = qMult
 		        
-		        Assert.AreEqual expected, actual, 2, d1.ToText + " * " + d2.ToText
+		        Assert.AreEqual expected, actual, 2, d1.ToText( locale, kFormat ) + " * " + d2.ToText( locale, kFormat ) + _
+		        ", exp should be " + expectedQuad.TrueExponent.ToText( locale, "###,##0" ) + _
+		        ", was " + qMult.TrueExponent.ToText( locale, "###,##0" )
+		        if Assert.Failed then
+		          fails.Append d1
+		          fails.Append d2
+		        end if
 		      next
 		      
 		      mult = 0.0 - mult
